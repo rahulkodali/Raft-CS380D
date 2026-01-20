@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package raft;
+
+// Common message types
+message Empty {}
+
+message IntegerArg {
+    int32 arg = 1;
+}
+
+message GenericResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+// Client operation messages
+message KeyValue {
+    string key = 1;
+    string value = 2;
+    int32 clientId = 3;
+    int32 requestId = 4;
+}
+
+message GetKey {
+    string key = 1;
+    int32 clientId = 2;
+    int32 requestId = 3;
+}
+
+message Reply {
+    bool wrongLeader = 1;
+    string error = 2;
+    string value = 3;
+}
+
+// Raft state information
+message State {
+    int32 term = 1;
+    bool isLeader = 2;
+    int32 commitIndex = 3;
+    int32 lastApplied = 4;
+}
+
+// Raft RPC messages (for future assignments)
+message AppendEntriesArgs {
+    int32 term = 1;
+    int32 leaderId = 2;
+    int32 prevLogIndex = 3;
+    int32 prevLogTerm = 4;
+    repeated LogEntry entries = 5;
+    int32 leaderCommit = 6;
+}
+
+message AppendEntriesReply {
+    int32 term = 1;
+    bool success = 2;
+}
+
+message RequestVoteArgs {
+    int32 term = 1;
+    int32 candidateId = 2;
+    int32 lastLogIndex = 3;
+    int32 lastLogTerm = 4;
+}
+
+message RequestVoteReply {
+    int32 term = 1;
+    bool voteGranted = 2;
+}
+
+message LogEntry {
+    int32 term = 1;
+    string key = 2;
+    string value = 3;
+    int32 clientId = 4;
+    int32 requestId = 5;
+}
+
+// Frontend service (Assignment 1)
+service FrontEnd {
+    rpc StartRaft(IntegerArg) returns (Reply);
+    rpc StartServer(IntegerArg) returns (Reply);
+    rpc Get(GetKey) returns (Reply);
+    rpc Put(KeyValue) returns (Reply);
+}
+
+// Server service (Assignment 1 stubs, full implementation in later assignments)
+service KeyValueStore {
+    // Basic operations
+    rpc ping(Empty) returns (GenericResponse);
+    rpc GetState(Empty) returns (State);
+    
+    // Client operations (will be implemented in Assignment 2)
+    rpc Get(GetKey) returns (Reply);
+    rpc Put(KeyValue) returns (Reply);
+    
+    // Raft RPCs (will be implemented in Assignment 3)
+    rpc AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply);
+    rpc RequestVote(RequestVoteArgs) returns (RequestVoteReply);
+}
