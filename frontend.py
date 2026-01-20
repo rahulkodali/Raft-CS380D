@@ -9,12 +9,12 @@ class FrontEndServicer(raft_pb2_grpc.FrontEndServicer):
 
         num_servers = request.arg
         for i in range(num_servers):
-            subprocess.Popen([sys.executable, "server.py", str(i)])
+            subprocess.Popen(["python3", "server.py", str(i)])
         return raft_pb2.Reply(wrongLeader=False)
 
     def StartServer(self, request, context):
         server_number = request.arg
-        subprocess.Popen([sys.executable, "server.py", str(server_number)])
+        subprocess.Popen(["python3", "server.py", str(server_number)])
         return raft_pb2.Reply(wrongLeader=False)
     
     def Get(self, request, context):
