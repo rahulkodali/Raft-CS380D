@@ -6,16 +6,21 @@ import sys
 
 class FrontEndServicer(raft_pb2_grpc.FrontEndServicer):
     def StartRaft(self, request, context):
-
-        num_servers = request.arg
-        for i in range(num_servers):
-            subprocess.Popen(["python3", "server.py", str(i)])
-        return raft_pb2.Reply(wrongLeader=False)
+        try:
+            num_servers = request.arg
+            for i in range(num_servers):
+                subprocess.Popen(["python3", "server.py", str(i)])
+            return raft_pb2.Reply(wrongLeader=False)
+        except Exception as e:
+            return raft_pb2.Reply(wrongLeader=True, error = str(e))
 
     def StartServer(self, request, context):
-        server_number = request.arg
-        subprocess.Popen(["python3", "server.py", str(server_number)])
-        return raft_pb2.Reply(wrongLeader=False)
+        try:
+            server_number = request.arg
+            subprocess.Popen(["python3", "server.py", str(server_number)])
+            return raft_pb2.Reply(wrongLeader=False)
+        except Exception as e:
+            return raft_pb2.Reply(wrongLeader=True, error = str(e))
     
     def Get(self, request, context):
         return raft_pb2.Reply(wrongLeader=True, error="Not implemented")
