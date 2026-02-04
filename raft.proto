@@ -9,6 +9,10 @@ message IntegerArg {
     int32 arg = 1;
 }
 
+message StringArg {
+    string arg = 1;
+}
+
 message GenericResponse {
     bool success = 1;
     string error = 2;
@@ -77,7 +81,7 @@ message LogEntry {
     int32 requestId = 5;
 }
 
-// Frontend service (Assignment 1)
+// Frontend service (Assignment 1 & 2)
 service FrontEnd {
     rpc StartRaft(IntegerArg) returns (Reply);
     rpc StartServer(IntegerArg) returns (Reply);
@@ -85,15 +89,15 @@ service FrontEnd {
     rpc Put(KeyValue) returns (Reply);
 }
 
-// Server service (Assignment 1 stubs, full implementation in later assignments)
+// Server service (Assignment 1 stubs, Assignment 2 implementation)
 service KeyValueStore {
     // Basic operations
     rpc ping(Empty) returns (GenericResponse);
     rpc GetState(Empty) returns (State);
     
-    // Client operations (will be implemented in Assignment 2)
-    rpc Get(GetKey) returns (Reply);
-    rpc Put(KeyValue) returns (Reply);
+    // Client operations (Assignment 2 implementation)
+    rpc Get(StringArg) returns (KeyValue);
+    rpc Put(KeyValue) returns (GenericResponse);
     
     // Raft RPCs (will be implemented in Assignment 3)
     rpc AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply);
