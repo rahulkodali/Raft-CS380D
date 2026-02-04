@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class FrontEndStub(object):
-    """Frontend service (Assignment 1)
+    """Frontend service (Assignment 1 & 2)
     """
 
     def __init__(self, channel):
@@ -58,7 +58,7 @@ class FrontEndStub(object):
 
 
 class FrontEndServicer(object):
-    """Frontend service (Assignment 1)
+    """Frontend service (Assignment 1 & 2)
     """
 
     def StartRaft(self, request, context):
@@ -117,7 +117,7 @@ def add_FrontEndServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class FrontEnd(object):
-    """Frontend service (Assignment 1)
+    """Frontend service (Assignment 1 & 2)
     """
 
     @staticmethod
@@ -230,7 +230,7 @@ class FrontEnd(object):
 
 
 class KeyValueStoreStub(object):
-    """Server service (Assignment 1 stubs, full implementation in later assignments)
+    """Server service (Assignment 1 stubs, Assignment 2 implementation)
     """
 
     def __init__(self, channel):
@@ -251,13 +251,13 @@ class KeyValueStoreStub(object):
                 _registered_method=True)
         self.Get = channel.unary_unary(
                 '/raft.KeyValueStore/Get',
-                request_serializer=raft__pb2.GetKey.SerializeToString,
-                response_deserializer=raft__pb2.Reply.FromString,
+                request_serializer=raft__pb2.StringArg.SerializeToString,
+                response_deserializer=raft__pb2.KeyValue.FromString,
                 _registered_method=True)
         self.Put = channel.unary_unary(
                 '/raft.KeyValueStore/Put',
                 request_serializer=raft__pb2.KeyValue.SerializeToString,
-                response_deserializer=raft__pb2.Reply.FromString,
+                response_deserializer=raft__pb2.GenericResponse.FromString,
                 _registered_method=True)
         self.AppendEntries = channel.unary_unary(
                 '/raft.KeyValueStore/AppendEntries',
@@ -272,7 +272,7 @@ class KeyValueStoreStub(object):
 
 
 class KeyValueStoreServicer(object):
-    """Server service (Assignment 1 stubs, full implementation in later assignments)
+    """Server service (Assignment 1 stubs, Assignment 2 implementation)
     """
 
     def ping(self, request, context):
@@ -289,7 +289,7 @@ class KeyValueStoreServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def Get(self, request, context):
-        """Client operations (will be implemented in Assignment 2)
+        """Client operations (Assignment 2 implementation)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -329,13 +329,13 @@ def add_KeyValueStoreServicer_to_server(servicer, server):
             ),
             'Get': grpc.unary_unary_rpc_method_handler(
                     servicer.Get,
-                    request_deserializer=raft__pb2.GetKey.FromString,
-                    response_serializer=raft__pb2.Reply.SerializeToString,
+                    request_deserializer=raft__pb2.StringArg.FromString,
+                    response_serializer=raft__pb2.KeyValue.SerializeToString,
             ),
             'Put': grpc.unary_unary_rpc_method_handler(
                     servicer.Put,
                     request_deserializer=raft__pb2.KeyValue.FromString,
-                    response_serializer=raft__pb2.Reply.SerializeToString,
+                    response_serializer=raft__pb2.GenericResponse.SerializeToString,
             ),
             'AppendEntries': grpc.unary_unary_rpc_method_handler(
                     servicer.AppendEntries,
@@ -356,7 +356,7 @@ def add_KeyValueStoreServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class KeyValueStore(object):
-    """Server service (Assignment 1 stubs, full implementation in later assignments)
+    """Server service (Assignment 1 stubs, Assignment 2 implementation)
     """
 
     @staticmethod
@@ -428,8 +428,8 @@ class KeyValueStore(object):
             request,
             target,
             '/raft.KeyValueStore/Get',
-            raft__pb2.GetKey.SerializeToString,
-            raft__pb2.Reply.FromString,
+            raft__pb2.StringArg.SerializeToString,
+            raft__pb2.KeyValue.FromString,
             options,
             channel_credentials,
             insecure,
@@ -456,7 +456,7 @@ class KeyValueStore(object):
             target,
             '/raft.KeyValueStore/Put',
             raft__pb2.KeyValue.SerializeToString,
-            raft__pb2.Reply.FromString,
+            raft__pb2.GenericResponse.FromString,
             options,
             channel_credentials,
             insecure,

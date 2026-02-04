@@ -1,9 +1,25 @@
 import sys
 import grpc
+import threading
 import raft_pb2, raft_pb2_grpc
 from concurrent import futures
 
 class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
+    def __init__(self):
+        self.storage = {}
+        self.lock = threading.Lock()
+    
+    def Get(self, request, context):
+        key = request.arg
+        with self.lock:
+            value = self.storage.get(key, "")
+        return raft_pb2.KeyValue(key=key, value=value)
+    
+    def Put(self, request, context):
+        with self.lock:
+            self.storage[request.key] = request.value
+        return raft_pb2.GenericResponse(success=True)
+
     def ping(self, request, context):
         return raft_pb2.GenericResponse(success=True)
     
