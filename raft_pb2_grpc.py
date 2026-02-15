@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class FrontEndStub(object):
-    """Frontend service (Assignment 1 & 2)
+    """Frontend service
     """
 
     def __init__(self, channel):
@@ -58,7 +58,7 @@ class FrontEndStub(object):
 
 
 class FrontEndServicer(object):
-    """Frontend service (Assignment 1 & 2)
+    """Frontend service
     """
 
     def StartRaft(self, request, context):
@@ -117,7 +117,7 @@ def add_FrontEndServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class FrontEnd(object):
-    """Frontend service (Assignment 1 & 2)
+    """Frontend service
     """
 
     @staticmethod
@@ -230,7 +230,7 @@ class FrontEnd(object):
 
 
 class KeyValueStoreStub(object):
-    """Server service (Assignment 1 stubs, Assignment 2 implementation)
+    """Server service
     """
 
     def __init__(self, channel):
@@ -272,7 +272,7 @@ class KeyValueStoreStub(object):
 
 
 class KeyValueStoreServicer(object):
-    """Server service (Assignment 1 stubs, Assignment 2 implementation)
+    """Server service
     """
 
     def ping(self, request, context):
@@ -289,7 +289,7 @@ class KeyValueStoreServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def Get(self, request, context):
-        """Client operations (Assignment 2 implementation)
+        """Client operations (Assignment 2)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -302,7 +302,7 @@ class KeyValueStoreServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def AppendEntries(self, request, context):
-        """Raft RPCs (will be implemented in Assignment 3)
+        """Raft RPCs (Assignment 3+)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -356,7 +356,7 @@ def add_KeyValueStoreServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class KeyValueStore(object):
-    """Server service (Assignment 1 stubs, Assignment 2 implementation)
+    """Server service
     """
 
     @staticmethod

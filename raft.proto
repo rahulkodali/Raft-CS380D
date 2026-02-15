@@ -46,7 +46,7 @@ message State {
     int32 lastApplied = 4;
 }
 
-// Raft RPC messages (for future assignments)
+// Raft RPC messages
 message AppendEntriesArgs {
     int32 term = 1;
     int32 leaderId = 2;
@@ -81,7 +81,7 @@ message LogEntry {
     int32 requestId = 5;
 }
 
-// Frontend service (Assignment 1 & 2)
+// Frontend service
 service FrontEnd {
     rpc StartRaft(IntegerArg) returns (Reply);
     rpc StartServer(IntegerArg) returns (Reply);
@@ -89,17 +89,17 @@ service FrontEnd {
     rpc Put(KeyValue) returns (Reply);
 }
 
-// Server service (Assignment 1 stubs, Assignment 2 implementation)
+// Server service
 service KeyValueStore {
     // Basic operations
     rpc ping(Empty) returns (GenericResponse);
     rpc GetState(Empty) returns (State);
     
-    // Client operations (Assignment 2 implementation)
+    // Client operations (Assignment 2)
     rpc Get(StringArg) returns (KeyValue);
     rpc Put(KeyValue) returns (GenericResponse);
     
-    // Raft RPCs (will be implemented in Assignment 3)
+    // Raft RPCs (Assignment 3+)
     rpc AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply);
     rpc RequestVote(RequestVoteArgs) returns (RequestVoteReply);
 }
