@@ -10,6 +10,12 @@ import grpc
 import raft_pb2
 import raft_pb2_grpc
 
+class LogEntry():
+    def __init__(self, term, key, value):
+        self.term = term
+        self.key = key
+        self.value = value
+
 
 class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
     def __init__(self, server_id, peer_ids, base_port=9001):
@@ -38,6 +44,15 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
         self.election_thread.start()
         self.heartbeat_thread.start()
 
+        ## Assignment 4 states
+        self.log = [None]
+        self.commit_index = 0
+        self.last_applied = 0
+        self.match_index = {peer_id: 0 for peer_id in peer_ids}
+        self.next_index = {peer_id: 1 for peer_id in peer_ids}
+        self.apply_cv = threading.Condition(self.state_lock)
+
+
     ##reset when to start election
     def _reset_election_deadline(self):
         self.election_deadline = time.time() + self.rng.uniform(0.150, 0.300)
@@ -55,9 +70,29 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
         self.role = "leader"
         self.leaderId = self.server_id
 
+    def _apply_committed_entries(self):
+        with self.store_lock:
+            while self.last_applied < self.commit_index:
+                self.last_applied += 1
+                entry = self.log[self.last_applied]
+                self.storage[entry.key] = entry.value
+    
+    def _advance_commit_index(self):
+            for i in range(self.commit_index + 1, len(self.log) - 1)[::-1]:
+                count = 0
+                with self.state_lock:
+                    for peer in self.match_index:
+                        if self.match_index[peer] >= i:
+                            count += 1
+                    if count >= self._cluster_majority() and self.log[i].term == self.currentTerm:
+                        self.commit_index = i
+                        self._apply_committed_entries()
+
+
+
 
     def _cluster_majority(self):
-        return len(self.peer_ids) + 1
+        return (len(self.peer_ids) + 1) // 2 + 1
 
     def _request_vote(self, peer, election_term):
         try:
@@ -140,22 +175,31 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
                 try:
                     channel = grpc.insecure_channel(f"localhost:{self.base_port + peer}")
                     stub = raft_pb2_grpc.KeyValueStoreStub(channel)
-                    reply = stub.AppendEntries(
-                        raft_pb2.AppendEntriesArgs(
-                            term=heartbeat_term,
-                            leaderId=self.server_id,
-                            prevLogIndex=0,
-                            prevLogTerm=0,
-                            entries=[],
-                            leaderCommit=0,
-                        ),
-                        timeout=0.3,
-                    )
-                    with self.state_lock:
-                        ##if we get a larger term response step down
-                        if reply.term > self.currentTerm:
-                            self._become_follower(reply.term)
-                            break
+
+                    while True:
+                        reply = stub.AppendEntries(
+                            raft_pb2.AppendEntriesArgs(
+                                term=heartbeat_term,
+                                leaderId=self.server_id,
+                                prevLogIndex=self.next_index[peer] - 1,
+                                prevLogTerm=self.log[self.next_index[peer] - 1],
+                                entries=self.log[self.next_index[peer]:],
+                                leaderCommit=self.commit_index,
+                            ),
+                            timeout=0.3,
+                        )
+                        with self.state_lock:
+                            if reply.success == True or reply.term > self.currentTerm:
+                                ##if we get a larger term response step down
+                                if reply.term > self.currentTerm:
+                                    self._become_follower(reply.term)
+                                    break
+                                else: 
+                                    self.match_index[peer] = self.next_index[peer] - 1 + len(self.log[self.next_index[peer]:])
+                                    self.next_index[peer] = self.match_index[peer] + 1
+                            else:
+                                self.next_index[peer] = max(1, self.next_index[peer] - 1)
+                    
                 except Exception:
                     continue
 
@@ -164,7 +208,7 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
 
     def GetState(self, request, context):
         with self.state_lock:
-            return raft_pb2.State(term=self.currentTerm, isLeader=(self.role == "leader"))
+            return raft_pb2.State(term=self.currentTerm, isLeader=(self.role == "leader"), commitIndex=self.commit_index, lastApplied=self.last_applied)
 
     def RequestVote(self, request, context):
         with self.state_lock:
@@ -184,12 +228,15 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
 
     def AppendEntries(self, request, context):
         with self.state_lock:
-            if request.term < self.currentTerm:
+            if request.prevLogIndex >= len(self.log) or (request.prevLogIndex > 0 and self.log[request.prevLogIndex].term != request.prevLogTerm):
                 return raft_pb2.AppendEntriesReply(term=self.currentTerm, success=False)
-
-            if request.term >= self.currentTerm or self.role != "follower":
+            elif request.term >= self.currentTerm or self.role != "follower":
                 self._become_follower(request.term, leader_id=request.leaderId)
             else:
+                self.log = self.log[::request.prevLogindex]
+                for entry in request.entries:
+                    self.log.append(entry)
+                self.commit_index = len(self.log - 1)
                 self.leaderId = request.leaderId
                 self._reset_election_deadline()
 
@@ -203,7 +250,16 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
 
     def Put(self, request, context):
         with self.store_lock:
-            self.storage[request.key] = request.value
+            if self.role != "leader":
+                return raft_pb2.GenericResponse(success=False, error="Not Leader")
+            logEntry = LogEntry(term = self.currentTerm, key = request.key, value = request.value)
+            self.log.append(logEntry)
+            self.match_index[server_id] = len(self.log) - 1
+            while self.commit_index < self.match_index[server_id]:
+                if self.role != "leader":
+                    return raft_pb2.GenericResponse(success=False, error="Not Leader")
+                time.sleep(0.05)
+
         return raft_pb2.GenericResponse(success=True)
 
 
