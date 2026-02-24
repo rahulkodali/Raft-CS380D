@@ -116,6 +116,6 @@ if __name__ == "__main__":
     port = 8001
     grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     raft_pb2_grpc.add_FrontEndServicer_to_server(FrontEndServicer(), grpc_server)
-    grpc_server.add_insecure_port(f"[::]:{port}")
+    grpc_server.add_insecure_port(f"127.0.0.1:{port}")
     grpc_server.start()
     grpc_server.wait_for_termination()
