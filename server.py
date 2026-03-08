@@ -1,4 +1,6 @@
 import configparser
+import json
+import os
 import random
 import sys
 import threading
@@ -12,28 +14,49 @@ import raft_pb2_grpc
 
 
 class LogEntry:
-    def __init__(self, term, key, value):
+    def __init__(self, term, key, value, client_id=-1, request_id=-1):
         self.term = term
         self.key = key
         self.value = value
+        self.clientId = client_id
+        self.requestId = request_id
 
 
 class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
-    def __init__(self, server_id, peer_ids, base_port=9001):
+    def __init__(self, server_id, peer_ids, base_port=9001, persistent_state_path="memory"):
         self.server_id = server_id
         self.peer_ids = peer_ids
         self.base_port = base_port
 
-        # Assignment 2 state
+        # Assignment 2 state machine
         self.storage = {}
         self.store_lock = threading.RLock()
 
-        # Assignment 3 Raft state
+        # Raft state
         self.state_lock = threading.RLock()
         self.currentTerm = 0
         self.votedFor = None
         self.role = "follower"
         self.leaderId = None
+
+        # replication state
+        self.log = [None]  # index 0 sentinel
+        self.commit_index = 0
+        self.last_applied = 0
+        self.match_index = {peer_id: 0 for peer_id in peer_ids}
+        self.next_index = {peer_id: 1 for peer_id in peer_ids}
+        self.apply_cv = threading.Condition(self.state_lock)
+
+        # persistence config
+        self.persistent_state_path = persistent_state_path
+        self.persistence_enabled = self.persistent_state_path != "memory"
+        self.state_file = None
+        if self.persistence_enabled:
+            self.state_file = os.path.join(self.persistent_state_path, f"server_{self.server_id}.json")
+            os.makedirs(self.persistent_state_path, exist_ok=True)
+
+        # Load persistent state before worker threads start.
+        self._load_state()
 
         self.stop_event = threading.Event()
         self.election_deadline = 0.0
@@ -45,13 +68,76 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
         self.election_thread.start()
         self.heartbeat_thread.start()
 
-        # Assignment 4 states
-        self.log = [None]
+    def _persist_state_locked(self):
+        if not self.persistence_enabled:
+            return
+
+        payload = {
+            "currentTerm": self.currentTerm,
+            "votedFor": self.votedFor,
+            "log": [
+                {
+                    "term": entry.term,
+                    "key": entry.key,
+                    "value": entry.value,
+                    "clientId": getattr(entry, "clientId", -1),
+                    "requestId": getattr(entry, "requestId", -1),
+                }
+                for entry in self.log[1:]
+            ],
+        }
+
+        tmp_file = f"{self.state_file}.tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, self.state_file)
+
+        # Best effort directory fsync for rename durability.
+        try:
+            dir_fd = os.open(self.persistent_state_path, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except Exception:
+            pass
+
+    def _load_state(self):
+        if not self.persistence_enabled:
+            return
+        if not os.path.exists(self.state_file):
+            return
+
+        try:
+            with open(self.state_file, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            return
+
+        self.currentTerm = int(payload.get("currentTerm", 0))
+        self.votedFor = payload.get("votedFor", None)
+
+        loaded_log = [None]
+        for item in payload.get("log", []):
+            loaded_log.append(
+                LogEntry(
+                    term=int(item.get("term", 0)),
+                    key=item.get("key", ""),
+                    value=item.get("value", ""),
+                    client_id=int(item.get("clientId", -1)),
+                    request_id=int(item.get("requestId", -1)),
+                )
+            )
+        self.log = loaded_log
+
+        # Volatile state rebuilt after restart.
         self.commit_index = 0
         self.last_applied = 0
-        self.match_index = {peer_id: 0 for peer_id in peer_ids}
-        self.next_index = {peer_id: 1 for peer_id in peer_ids}
-        self.apply_cv = threading.Condition(self.state_lock)
+        self.role = "follower"
+        self.leaderId = None
+        self.storage = {}
 
     def _reset_election_deadline(self):
         self.election_deadline = time.time() + self.rng.uniform(0.150, 0.300)
@@ -61,31 +147,38 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
         self.role = "follower"
         self.leaderId = leader_id
         self.votedFor = None
+        self._persist_state_locked()
         self._reset_election_deadline()
         self.apply_cv.notify_all()
 
     def _become_leader(self):
         self.role = "leader"
         self.leaderId = self.server_id
-        # Initialize replication state when becoming leader.
         next_idx = len(self.log)
         for peer in self.peer_ids:
             self.next_index[peer] = next_idx
             self.match_index[peer] = 0
+
+        # no-op entry on leadership to allow committing prior-term entries.
+        noop = LogEntry(self.currentTerm, "", "", -1, -1)
+        self.log.append(noop)
+        self._persist_state_locked()
 
     def _apply_committed_entries(self):
         with self.store_lock:
             while self.last_applied < self.commit_index:
                 self.last_applied += 1
                 entry = self.log[self.last_applied]
+                # Ignore no-op entry in state machine.
+                if entry.key == "" and entry.value == "" and entry.clientId == -1 and entry.requestId == -1:
+                    continue
                 self.storage[entry.key] = entry.value
 
     def _advance_commit_index(self):
         for i in range(len(self.log) - 1, self.commit_index, -1):
             if self.log[i].term != self.currentTerm:
                 continue
-            # Leader itself counts as one replica.
-            count = 1
+            count = 1  # leader
             for peer in self.match_index:
                 if self.match_index[peer] >= i:
                     count += 1
@@ -102,12 +195,15 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
         try:
             channel = grpc.insecure_channel(f"localhost:{self.base_port + peer}")
             stub = raft_pb2_grpc.KeyValueStoreStub(channel)
+
+            last_log_index = len(self.log) - 1
+            last_log_term = self.log[last_log_index].term if last_log_index > 0 else 0
             return stub.RequestVote(
                 raft_pb2.RequestVoteArgs(
                     term=election_term,
                     candidateId=self.server_id,
-                    lastLogIndex=0,
-                    lastLogTerm=0,
+                    lastLogIndex=last_log_index,
+                    lastLogTerm=last_log_term,
                 ),
                 timeout=0.3,
             )
@@ -127,6 +223,7 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
                 election_term = self.currentTerm
                 self.votedFor = self.server_id
                 self.leaderId = None
+                self._persist_state_locked()
                 votes = 1
                 self._reset_election_deadline()
 
@@ -172,7 +269,17 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
                             break
                         prev_idx = self.next_index[peer] - 1
                         prev_term = self.log[prev_idx].term if prev_idx > 0 else 0
-                        entries = self.log[self.next_index[peer] :]
+
+                        entries = [
+                            raft_pb2.LogEntry(
+                                term=e.term,
+                                key=e.key,
+                                value=e.value,
+                                clientId=e.clientId,
+                                requestId=e.requestId,
+                            )
+                            for e in self.log[self.next_index[peer] :]
+                        ]
                         leader_commit = self.commit_index
 
                     channel = grpc.insecure_channel(f"localhost:{self.base_port + peer}")
@@ -228,6 +335,7 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
             can_vote = self.votedFor is None or self.votedFor == request.candidateId
             if can_vote:
                 self.votedFor = request.candidateId
+                self._persist_state_locked()
                 self._reset_election_deadline()
                 return raft_pb2.RequestVoteReply(term=self.currentTerm, voteGranted=True)
 
@@ -252,15 +360,22 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
                 return raft_pb2.AppendEntriesReply(term=self.currentTerm, success=False)
 
             # Conflict handling + append.
+            changed = False
             idx = request.prevLogIndex + 1
             for entry in request.entries:
+                incoming = LogEntry(entry.term, entry.key, entry.value, entry.clientId, entry.requestId)
                 if idx < len(self.log):
-                    if self.log[idx].term != entry.term:
+                    if self.log[idx].term != incoming.term:
                         self.log = self.log[:idx]
-                        self.log.append(entry)
+                        self.log.append(incoming)
+                        changed = True
                 else:
-                    self.log.append(entry)
+                    self.log.append(incoming)
+                    changed = True
                 idx += 1
+
+            if changed:
+                self._persist_state_locked()
 
             # Follow leader commit index and apply.
             if request.leaderCommit > self.commit_index:
@@ -281,14 +396,15 @@ class KeyValueStoreServicer(raft_pb2_grpc.KeyValueStoreServicer):
             if self.role != "leader":
                 return raft_pb2.GenericResponse(success=False, error="Not leader")
 
-            log_entry = raft_pb2.LogEntry(
+            log_entry = LogEntry(
                 term=self.currentTerm,
                 key=request.key,
                 value=request.value,
-                clientId=request.clientId,
-                requestId=request.requestId,
+                client_id=request.clientId,
+                request_id=request.requestId,
             )
             self.log.append(log_entry)
+            self._persist_state_locked()
             my_index = len(self.log) - 1
 
         # Wait until committed, but fail fast if leadership is lost.
@@ -317,6 +433,10 @@ def _read_active_server_ids(config_path="config.ini"):
 if __name__ == "__main__":
     server_id = int(sys.argv[1])
 
+    parser = configparser.ConfigParser()
+    parser.read("config.ini")
+    persistent_state_path = parser.get("Servers", "persistent_state_path", fallback="memory")
+
     # Optional second argument lets frontend control cluster size for tests.
     if len(sys.argv) >= 3:
         cluster_size = int(sys.argv[2])
@@ -329,7 +449,13 @@ if __name__ == "__main__":
 
     grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     raft_pb2_grpc.add_KeyValueStoreServicer_to_server(
-        KeyValueStoreServicer(server_id, peer_ids, base_port=9001), grpc_server
+        KeyValueStoreServicer(
+            server_id,
+            peer_ids,
+            base_port=9001,
+            persistent_state_path=persistent_state_path,
+        ),
+        grpc_server,
     )
     grpc_server.add_insecure_port(f"[::]:{port}")
     grpc_server.start()

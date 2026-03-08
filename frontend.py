@@ -1,4 +1,6 @@
 import configparser
+import os
+import shutil
 import subprocess
 import sys
 from concurrent import futures
@@ -27,6 +29,11 @@ class FrontEndServicer(raft_pb2_grpc.FrontEndServicer):
             except Exception:
                 pass
         return [0, 1, 2, 3, 4]
+
+    def _persistent_state_path(self):
+        parser = configparser.ConfigParser()
+        parser.read(self.config_path)
+        return parser.get("Servers", "persistent_state_path", fallback="memory")
 
     def _get_stub(self, server_id):
         channel = grpc.insecure_channel(f"localhost:{self.base_port + server_id}")
@@ -93,6 +100,14 @@ class FrontEndServicer(raft_pb2_grpc.FrontEndServicer):
             num_servers = request.arg
             self.cluster_size = num_servers
             self._stop_all_server_processes()
+
+            # Assignment 6: clean state directory for new cluster start.
+            state_path = self._persistent_state_path()
+            if state_path != "memory":
+                if os.path.exists(state_path):
+                    shutil.rmtree(state_path)
+                os.makedirs(state_path, exist_ok=True)
+
             for i in range(num_servers):
                 proc = subprocess.Popen([sys.executable, "server.py", str(i), str(num_servers)])
                 self.server_processes[i] = proc
